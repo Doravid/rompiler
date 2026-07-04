@@ -1,0 +1,4 @@
+Program    ::= Statement
+Statement  ::= "return" Expression ";"
+Expression ::= Number
+Number     ::= [0-9]+
