@@ -1,10 +1,15 @@
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub enum Token {
     Eof,
     Semicolon,
     Return,
     Number(i64),
     Plus,
+    Const,
+    Var,
+    Colon,
+    Equals,
+    Identifier(String),
     Minus,
     Asterisk,
     Slash,
@@ -39,6 +44,8 @@ impl<'a> Lexer<'a> {
             '-' => Token::Minus,
             '*' => Token::Asterisk,
             '/' => Token::Slash,
+            ':' => Token::Colon,
+            '=' => Token::Equals,
             '0'..='9' => self.lex_number(ch),
             'a'..='z' | 'A'..='Z' | '_' => self.lex_identifier(ch),
             _ => Token::Illegal(ch.to_string()),
@@ -70,10 +77,12 @@ impl<'a> Lexer<'a> {
                 break;
             }
         }
-        if my_string == "return" {
-            return Token::Return;
+        match my_string.as_str() {
+            "return" => return Token::Return,
+            "const" => return Token::Const,
+            "var" => return Token::Var,
+            _ => return Token::Identifier(my_string),
         }
-        Token::Illegal(my_string)
     }
 }
 
@@ -146,5 +155,27 @@ mod tests {
         assert_eq!(minus_token, Token::Minus);
         assert_eq!(asterisk_token, Token::Asterisk);
         assert_eq!(slash_token, Token::Slash);
+    }
+
+    #[test]
+    fn test_variable_tokens() {
+        let mut lexer = Lexer::new("const x : i64 = 5;");
+        let token1: Token = lexer.next_token();
+        let token2: Token = lexer.next_token();
+        let token3: Token = lexer.next_token();
+        let token4: Token = lexer.next_token();
+        let token5: Token = lexer.next_token();
+        let token6: Token = lexer.next_token();
+        let token7: Token = lexer.next_token();
+        let token8: Token = lexer.next_token();
+
+        assert_eq!(token1, Token::Const);
+        assert_eq!(token2, Token::Identifier(String::from("x")));
+        assert_eq!(token3, Token::Colon);
+        assert_eq!(token4, Token::Identifier(String::from("i64")));
+        assert_eq!(token5, Token::Equals);
+        assert_eq!(token6, Token::Number(5));
+        assert_eq!(token7, Token::Semicolon);
+        assert_eq!(token8, Token::Eof);
     }
 }

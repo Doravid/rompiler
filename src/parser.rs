@@ -1,17 +1,21 @@
-use crate::ast::{self, Operator};
+use crate::ast::Expression::Identifier;
+use crate::ast::{self, Operator, Statement};
 use crate::lexer::{Lexer, Token};
 
 pub struct Parser<'a> {
     lexer: Lexer<'a>,
     current_token: Token,
+    peek_token: Token,
 }
 
 impl<'a> Parser<'a> {
     pub fn new(mut lexer: Lexer<'a>) -> Self {
         let current_token = lexer.next_token();
+        let peek_token = lexer.next_token();
         Self {
             lexer,
             current_token,
+            peek_token,
         }
     }
 
@@ -30,10 +34,78 @@ impl<'a> Parser<'a> {
     }
 
     fn advance(&mut self) {
-        self.current_token = self.lexer.next_token();
+        self.current_token = self.peek_token.clone();
+        self.peek_token = self.lexer.next_token();
     }
+    fn parse_declaration(&mut self) -> Option<ast::Statement> {
+        if self.current_token == Token::Var || self.current_token == Token::Const {
+            let is_mut = self.current_token == Token::Var;
+            self.advance();
 
+            let Token::Identifier(name) = self.current_token.clone() else {
+                return None;
+            };
+            self.advance();
+
+            if self.current_token != Token::Colon {
+                return None;
+            }
+            self.advance();
+
+            let Token::Identifier(type_name) = self.current_token.clone() else {
+                return None;
+            };
+            self.advance();
+
+            if self.current_token != Token::Equals {
+                return None;
+            }
+            self.advance();
+
+            let Some(initializer) = self.parse_expression(0) else {
+                return None;
+            };
+
+            if self.current_token == Token::Semicolon {
+                self.advance();
+            }
+
+            return Some(ast::Statement::Declaration {
+                is_mut,
+                name,
+                type_name,
+                initializer,
+            });
+        } else {
+            return None;
+        }
+    }
     fn parse_statement(&mut self) -> Option<ast::Statement> {
+        if self.current_token == Token::Var || self.current_token == Token::Const {
+            return self.parse_declaration();
+        }
+        if let Token::Identifier(name) = &self.current_token {
+            if self.peek_token == Token::Equals {
+                let var_name = name.clone();
+                self.advance();
+                self.advance();
+
+                if let Some(expr) = self.parse_expression(0) {
+                    if self.current_token == Token::Semicolon {
+                        self.advance();
+                    } else {
+                        panic!("Missing Semicolon!")
+                    }
+                    return Some(ast::Statement::Assignment {
+                        name: var_name,
+                        value: expr,
+                    });
+                }
+            } else {
+                panic!("Missing Equals!")
+            }
+        }
+
         if self.current_token == Token::Return {
             self.advance();
         } else {
@@ -50,28 +122,28 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_expression(&mut self, precedence: u8) -> Option<ast::Expression> {
-        if let Token::Number(left_val) = self.current_token {
-            let mut left = ast::Expression::Number(left_val);
+        let mut left = match &self.current_token {
+            Token::Number(val) => ast::Expression::Number(*val),
+            Token::Identifier(name) => ast::Expression::Identifier(name.clone()),
+            _ => return None,
+        };
+        self.advance();
 
+        while precedence < Parser::get_precedence(&self.current_token) {
+            let operator: Operator = match self.current_token {
+                Token::Asterisk => ast::Operator::Multiply,
+                Token::Plus => ast::Operator::Add,
+                Token::Minus => ast::Operator::Subtract,
+                Token::Slash => ast::Operator::Divide,
+                _ => return Some(left),
+            };
+            let cur_precedence = Parser::get_precedence(&self.current_token);
             self.advance();
 
-            while precedence < Parser::get_precedence(&self.current_token) {
-                let operator: Operator = match self.current_token {
-                    Token::Asterisk => ast::Operator::Multiply,
-                    Token::Plus => ast::Operator::Add,
-                    Token::Minus => ast::Operator::Subtract,
-                    Token::Slash => ast::Operator::Divide,
-                    _ => return Some(left),
-                };
-                let cur_precedence = Parser::get_precedence(&self.current_token);
-                self.advance();
-
-                let right = self.parse_expression(cur_precedence);
-                left = ast::Expression::Binary(Box::new(left), operator, Box::new(right.unwrap()));
-            }
-            return Some(left);
+            let right = self.parse_expression(cur_precedence);
+            left = ast::Expression::Binary(Box::new(left), operator, Box::new(right.unwrap()));
         }
-        return None;
+        return Some(left);
     }
     fn get_precedence(token: &Token) -> u8 {
         match token {
@@ -85,7 +157,7 @@ impl<'a> Parser<'a> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        ast::{self, Operator},
+        ast::{self, Expression, Operator, Statement},
         lexer::Lexer,
         parser::Parser,
     };
@@ -159,6 +231,44 @@ mod tests {
                 ast::Operator::Subtract,
                 num(3)
             ))
+        );
+    }
+
+    #[test]
+    fn test_parse_const_declaration() {
+        let p = parse("const x : i64 = 5;");
+        assert_eq!(p.statements.len(), 1);
+        assert_eq!(
+            p.statements[0],
+            Statement::Declaration {
+                is_mut: false,
+                name: "x".to_string(),
+                type_name: "i64".to_string(),
+                initializer: ast::Expression::Number(5)
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_identifier() {
+        let p = parse("return x;");
+        assert_eq!(p.statements.len(), 1);
+        assert_eq!(
+            p.statements[0],
+            Statement::Return(ast::Expression::Identifier("x".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_parse_assignment() {
+        let p = parse("x = 10;");
+        assert_eq!(p.statements.len(), 1);
+        assert_eq!(
+            p.statements[0],
+            Statement::Assignment {
+                name: "x".to_string(),
+                value: Expression::Number(10)
+            }
         );
     }
 }
