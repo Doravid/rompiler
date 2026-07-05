@@ -4,6 +4,10 @@ pub enum Token {
     Semicolon,
     Return,
     Number(i64),
+    Plus,
+    Minus,
+    Asterisk,
+    Slash,
     Illegal(String),
 }
 pub struct Lexer<'a> {
@@ -31,6 +35,10 @@ impl<'a> Lexer<'a> {
         };
         match ch {
             ';' => Token::Semicolon,
+            '+' => Token::Plus,
+            '-' => Token::Minus,
+            '*' => Token::Asterisk,
+            '/' => Token::Slash,
             '0'..='9' => self.lex_number(ch),
             'a'..='z' | 'A'..='Z' | '_' => self.lex_identifier(ch),
             _ => Token::Illegal(ch.to_string()),
@@ -71,8 +79,6 @@ impl<'a> Lexer<'a> {
 
 #[cfg(test)]
 mod tests {
-    // use crate::lexer;
-
     use super::*;
 
     #[test]
@@ -126,5 +132,19 @@ mod tests {
         assert_eq!(number_token, Token::Number(505));
         assert_eq!(semicolon_token, Token::Semicolon);
         assert_eq!(eof_token, Token::Eof);
+    }
+
+    #[test]
+    fn test_math_operators() {
+        let mut lexer = Lexer::new("    + - * / ");
+        let plus_token: Token = lexer.next_token();
+        let minus_token: Token = lexer.next_token();
+        let asterisk_token: Token = lexer.next_token();
+        let slash_token: Token = lexer.next_token();
+
+        assert_eq!(plus_token, Token::Plus);
+        assert_eq!(minus_token, Token::Minus);
+        assert_eq!(asterisk_token, Token::Asterisk);
+        assert_eq!(slash_token, Token::Slash);
     }
 }
