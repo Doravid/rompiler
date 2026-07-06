@@ -18,7 +18,21 @@ impl<'a> Parser<'a> {
             peek_token,
         }
     }
-
+    fn parse_type(&mut self, name: &str) -> Option<ast::Type> {
+        match name {
+            "i8" => Some(ast::Type::I8),
+            "i16" => Some(ast::Type::I16),
+            "i32" => Some(ast::Type::I32),
+            "i64" => Some(ast::Type::I64),
+            "u8" => Some(ast::Type::U8),
+            "u16" => Some(ast::Type::U16),
+            "u32" => Some(ast::Type::U32),
+            "u64" => Some(ast::Type::U64),
+            "f32" => Some(ast::Type::F32),
+            "f64" => Some(ast::Type::F64),
+            _ => None,
+        }
+    }
     pub fn parse_program(&mut self) -> ast::Program {
         let mut prog = ast::Program {
             statements: Vec::new(),
@@ -73,7 +87,7 @@ impl<'a> Parser<'a> {
             return Some(ast::Statement::Declaration {
                 is_mut,
                 name,
-                type_name,
+                type_name: self.parse_type(&type_name).unwrap(),
                 initializer,
             });
         } else {
@@ -123,7 +137,8 @@ impl<'a> Parser<'a> {
 
     fn parse_expression(&mut self, precedence: u8) -> Option<ast::Expression> {
         let mut left = match &self.current_token {
-            Token::Number(val) => ast::Expression::Number(*val),
+            Token::Integer(val) => ast::Expression::Integer(*val),
+            Token::Float(val) => ast::Expression::Float(*val),
             Token::Identifier(name) => ast::Expression::Identifier(name.clone()),
             _ => return None,
         };
@@ -157,7 +172,7 @@ impl<'a> Parser<'a> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        ast::{self, Expression, Operator, Statement},
+        ast::{self, Expression, Operator, Statement, Type},
         lexer::Lexer,
         parser::Parser,
     };
@@ -169,7 +184,7 @@ mod tests {
     }
 
     fn num(n: i64) -> ast::Expression {
-        ast::Expression::Number(n)
+        ast::Expression::Integer(n)
     }
 
     fn bin(left: ast::Expression, op: ast::Operator, right: ast::Expression) -> ast::Expression {
@@ -243,8 +258,8 @@ mod tests {
             Statement::Declaration {
                 is_mut: false,
                 name: "x".to_string(),
-                type_name: "i64".to_string(),
-                initializer: ast::Expression::Number(5)
+                type_name: Type::I64,
+                initializer: ast::Expression::Integer(5)
             }
         );
     }
@@ -267,7 +282,22 @@ mod tests {
             p.statements[0],
             Statement::Assignment {
                 name: "x".to_string(),
-                value: Expression::Number(10)
+                value: Expression::Integer(10)
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_float_declaration() {
+        let p = parse("const pi : f64 = 3.14;");
+        assert_eq!(p.statements.len(), 1);
+        assert_eq!(
+            p.statements[0],
+            Statement::Declaration {
+                is_mut: false,
+                name: "pi".to_string(),
+                type_name: Type::F64,
+                initializer: ast::Expression::Float(3.14)
             }
         );
     }

@@ -3,7 +3,8 @@ pub enum Token {
     Eof,
     Semicolon,
     Return,
-    Number(i64),
+    Integer(i64),
+    Float(f64),
     Plus,
     Const,
     Var,
@@ -13,6 +14,7 @@ pub enum Token {
     Minus,
     Asterisk,
     Slash,
+    Ampersand,
     Illegal(String),
 }
 pub struct Lexer<'a> {
@@ -43,6 +45,7 @@ impl<'a> Lexer<'a> {
             '+' => Token::Plus,
             '-' => Token::Minus,
             '*' => Token::Asterisk,
+            '&' => Token::Ampersand,
             '/' => Token::Slash,
             ':' => Token::Colon,
             '=' => Token::Equals,
@@ -54,16 +57,26 @@ impl<'a> Lexer<'a> {
 
     fn lex_number(&mut self, first: char) -> Token {
         let mut my_string = String::from(first);
-
+        let mut is_float = false;
         while let Some(&c) = self.input.peek() {
             if c.is_ascii_digit() {
+                my_string.push(c);
+                self.input.next();
+            } else if c == '.' {
+                if is_float {
+                    panic!("Number contains two periods");
+                }
+                is_float = true;
                 my_string.push(c);
                 self.input.next();
             } else {
                 break;
             }
         }
-        return Token::Number(my_string.parse().unwrap());
+        if is_float {
+            return Token::Float(my_string.parse().unwrap());
+        }
+        return Token::Integer(my_string.parse().unwrap());
     }
 
     fn lex_identifier(&mut self, first: char) -> Token {
@@ -111,14 +124,14 @@ mod tests {
         let mut lexer = Lexer::new(" 5 ");
         let my_token: Token = lexer.next_token();
 
-        assert_eq!(my_token, Token::Number(5));
+        assert_eq!(my_token, Token::Integer(5));
     }
     #[test]
     fn test_multi_digit_number() {
         let mut lexer = Lexer::new(" 505 ");
         let my_token: Token = lexer.next_token();
 
-        assert_eq!(my_token, Token::Number(505));
+        assert_eq!(my_token, Token::Integer(505));
     }
     #[test]
 
@@ -138,7 +151,7 @@ mod tests {
         let eof_token: Token = lexer.next_token();
 
         assert_eq!(return_token, Token::Return);
-        assert_eq!(number_token, Token::Number(505));
+        assert_eq!(number_token, Token::Integer(505));
         assert_eq!(semicolon_token, Token::Semicolon);
         assert_eq!(eof_token, Token::Eof);
     }
@@ -158,6 +171,28 @@ mod tests {
     }
 
     #[test]
+    fn test_floats() {
+        let mut lexer = Lexer::new("10.52");
+        let float: Token = lexer.next_token();
+        let eof: Token = lexer.next_token();
+
+        assert_eq!(float, Token::Float(10.52));
+        assert_eq!(eof, Token::Eof);
+    }
+
+    #[test]
+    fn test_ampersand() {
+        let mut lexer = Lexer::new("&x");
+        let ampersand: Token = lexer.next_token();
+        let x: Token = lexer.next_token();
+        let eof: Token = lexer.next_token();
+
+        assert_eq!(ampersand, Token::Ampersand);
+        assert_eq!(x, Token::Identifier("x".to_string()));
+        assert_eq!(eof, Token::Eof);
+    }
+
+    #[test]
     fn test_variable_tokens() {
         let mut lexer = Lexer::new("const x : i64 = 5;");
         let token1: Token = lexer.next_token();
@@ -174,7 +209,7 @@ mod tests {
         assert_eq!(token3, Token::Colon);
         assert_eq!(token4, Token::Identifier(String::from("i64")));
         assert_eq!(token5, Token::Equals);
-        assert_eq!(token6, Token::Number(5));
+        assert_eq!(token6, Token::Integer(5));
         assert_eq!(token7, Token::Semicolon);
         assert_eq!(token8, Token::Eof);
     }
