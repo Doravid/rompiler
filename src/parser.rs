@@ -1,5 +1,4 @@
-use crate::ast::Expression::Identifier;
-use crate::ast::{self, Operator, Statement};
+use crate::ast::{self, Expression, Operator, Statement, Type};
 use crate::lexer::{Lexer, Token};
 
 pub struct Parser<'a> {
@@ -18,7 +17,7 @@ impl<'a> Parser<'a> {
             peek_token,
         }
     }
-    fn parse_type(&mut self, name: &str) -> Option<ast::Type> {
+    fn parse_type_from_string(&mut self, name: &str) -> Option<ast::Type> {
         match name {
             "i8" => Some(ast::Type::I8),
             "i16" => Some(ast::Type::I16),
@@ -33,6 +32,49 @@ impl<'a> Parser<'a> {
             _ => None,
         }
     }
+    fn parse_type(&mut self) -> Option<ast::Type> {
+        let is_pointer = self.current_token == Token::Asterisk;
+        if is_pointer {
+            self.advance();
+        }
+        let is_array = self.current_token == Token::LeftBracket;
+
+        if is_array {
+            self.advance();
+            let Token::Integer(array_size) = self.current_token.clone() else {
+                return None;
+            };
+            self.advance();
+            assert!(self.current_token == Token::RightBracket);
+            self.advance();
+            let Token::Identifier(type_name) = self.current_token.clone() else {
+                return None;
+            };
+            self.advance();
+            let typ = self.parse_type_from_string(&type_name).unwrap();
+            if is_pointer {
+                return Some(Type::Pointer(Box::new(Type::Array(
+                    Box::new(typ),
+                    array_size,
+                ))));
+            } else {
+                return Some(Type::Array(Box::new(typ), array_size));
+            }
+        }
+
+        let Token::Identifier(type_name) = self.current_token.clone() else {
+            return None;
+        };
+        self.advance();
+
+        let typ = self.parse_type_from_string(&type_name).unwrap();
+        if is_pointer {
+            return Some(Type::Pointer(Box::new(typ)));
+        } else {
+            return Some(typ);
+        }
+    }
+
     pub fn parse_program(&mut self) -> ast::Program {
         let mut prog = ast::Program {
             statements: Vec::new(),
@@ -52,53 +94,91 @@ impl<'a> Parser<'a> {
         self.peek_token = self.lexer.next_token();
     }
     fn parse_declaration(&mut self) -> Option<ast::Statement> {
-        if self.current_token == Token::Var || self.current_token == Token::Const {
-            let is_mut = self.current_token == Token::Var;
-            self.advance();
+        let is_mut = self.current_token == Token::Var;
 
-            let Token::Identifier(name) = self.current_token.clone() else {
-                return None;
-            };
-            self.advance();
+        self.advance();
+        let Token::Identifier(name) = self.current_token.clone() else {
+            return None;
+        };
+        self.advance();
 
-            if self.current_token != Token::Colon {
-                return None;
-            }
-            self.advance();
+        if self.current_token != Token::Colon {
+            return None;
+        }
 
-            let Token::Identifier(type_name) = self.current_token.clone() else {
-                return None;
-            };
-            self.advance();
+        self.advance();
+        let Some(value_type) = self.parse_type() else {
+            return None;
+        };
 
-            if self.current_token != Token::Equals {
-                return None;
-            }
-            self.advance();
-
-            let Some(initializer) = self.parse_expression(0) else {
-                return None;
-            };
-
-            if self.current_token == Token::Semicolon {
-                self.advance();
-            }
-
+        if self.current_token == Token::Semicolon {
             return Some(ast::Statement::Declaration {
                 is_mut,
                 name,
-                type_name: self.parse_type(&type_name).unwrap(),
-                initializer,
+                type_name: value_type,
+                initializer: None,
             });
-        } else {
+        }
+
+        if self.current_token != Token::Equals {
             return None;
         }
+        self.advance();
+
+        let Some(initializer) = self.parse_expression(0) else {
+            return None;
+        };
+
+        if self.current_token != Token::Semicolon {
+            return None;
+        }
+        self.advance();
+
+        return Some(ast::Statement::Declaration {
+            is_mut,
+            name,
+            type_name: value_type,
+            initializer: Some(initializer),
+        });
     }
     fn parse_statement(&mut self) -> Option<ast::Statement> {
         if self.current_token == Token::Var || self.current_token == Token::Const {
             return self.parse_declaration();
         }
+
         if let Token::Identifier(name) = &self.current_token {
+            let var_name = name.clone();
+
+            if self.peek_token == Token::LeftBracket {
+                self.advance();
+                self.advance();
+                let Some(index) = self.parse_expression(0) else {
+                    panic!(
+                        "Failed to parse expression for array index in setting a value in the array."
+                    );
+                };
+                if self.current_token != Token::RightBracket {
+                    panic!("No right bracket on array index");
+                }
+                self.advance();
+                if self.current_token != Token::Equals {
+                    panic!("No equals sign in array setting statement");
+                }
+                self.advance();
+                let Some(value) = self.parse_expression(0) else {
+                    panic!("Invalid expression. Cannot set array value.");
+                };
+                if self.current_token != Token::Semicolon {
+                    panic!("Array statement not ended with a semicolon!");
+                }
+                self.advance();
+                return Some(Statement::IndexAssignment {
+                    name: var_name,
+                    index,
+                    value,
+                });
+            }
+
             if self.peek_token == Token::Equals {
                 let var_name = name.clone();
                 self.advance();
@@ -116,7 +196,7 @@ impl<'a> Parser<'a> {
                     });
                 }
             } else {
-                panic!("Missing Equals!")
+                return None;
             }
         }
 
@@ -137,19 +217,51 @@ impl<'a> Parser<'a> {
 
     fn parse_expression(&mut self, precedence: u8) -> Option<ast::Expression> {
         let mut left = match &self.current_token {
-            Token::Integer(val) => ast::Expression::Integer(*val),
-            Token::Float(val) => ast::Expression::Float(*val),
-            Token::Identifier(name) => ast::Expression::Identifier(name.clone()),
+            Token::Integer(val) => {
+                let expr = ast::Expression::Integer(*val);
+                self.advance();
+                expr
+            }
+            Token::Float(val) => {
+                let expr = ast::Expression::Float(*val);
+                self.advance();
+                expr
+            }
+            Token::Identifier(name) => {
+                let expr = ast::Expression::Identifier(name.clone());
+                self.advance();
+                expr
+            }
+            Token::Ampersand => {
+                self.advance();
+                ast::Expression::AddressOf(Box::new(self.parse_expression(3).unwrap()))
+            }
+            Token::Asterisk => {
+                self.advance();
+                ast::Expression::Dereference(Box::new(self.parse_expression(3).unwrap()))
+            }
             _ => return None,
         };
-        self.advance();
 
         while precedence < Parser::get_precedence(&self.current_token) {
+            if self.current_token == Token::LeftBracket {
+                self.advance();
+                let Some(expr) = self.parse_expression(0) else {
+                    return None;
+                };
+                if self.current_token != Token::RightBracket {
+                    return None;
+                }
+                self.advance();
+                return Some(ast::Expression::Index(Box::new(left), Box::new(expr)));
+            }
+
             let operator: Operator = match self.current_token {
                 Token::Asterisk => ast::Operator::Multiply,
                 Token::Plus => ast::Operator::Add,
                 Token::Minus => ast::Operator::Subtract,
                 Token::Slash => ast::Operator::Divide,
+
                 _ => return Some(left),
             };
             let cur_precedence = Parser::get_precedence(&self.current_token);
@@ -164,6 +276,7 @@ impl<'a> Parser<'a> {
         match token {
             Token::Plus | Token::Minus => 1,
             Token::Asterisk | Token::Slash => 2,
+            Token::LeftBracket => 3,
             _ => 0,
         }
     }
@@ -172,7 +285,7 @@ impl<'a> Parser<'a> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        ast::{self, Expression, Operator, Statement, Type},
+        ast::{self, Expression, Statement, Type},
         lexer::Lexer,
         parser::Parser,
     };
@@ -259,7 +372,7 @@ mod tests {
                 is_mut: false,
                 name: "x".to_string(),
                 type_name: Type::I64,
-                initializer: ast::Expression::Integer(5)
+                initializer: Some(ast::Expression::Integer(5))
             }
         );
     }
@@ -297,7 +410,112 @@ mod tests {
                 is_mut: false,
                 name: "pi".to_string(),
                 type_name: Type::F64,
-                initializer: ast::Expression::Float(3.14)
+                initializer: Some(ast::Expression::Float(3.14))
+            }
+        );
+    }
+    #[test]
+    fn test_parse_pointer_declaration() {
+        let p = parse("const p : *i64 = &x;");
+        assert_eq!(p.statements.len(), 1);
+        assert_eq!(
+            p.statements[0],
+            Statement::Declaration {
+                is_mut: false,
+                name: "p".to_string(),
+                type_name: ast::Type::Pointer(Box::new(ast::Type::I64)),
+                initializer: Some(ast::Expression::AddressOf(Box::new(
+                    ast::Expression::Identifier("x".to_string())
+                )))
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_dereference() {
+        let p = parse("return *p;");
+        assert_eq!(p.statements.len(), 1);
+        assert_eq!(
+            p.statements[0],
+            Statement::Return(ast::Expression::Dereference(Box::new(
+                ast::Expression::Identifier("p".to_string())
+            )))
+        );
+    }
+
+    #[test]
+    fn test_parse_uninitialized() {
+        let p = parse("const x: i32;");
+        assert_eq!(p.statements.len(), 1);
+        assert_eq!(
+            p.statements[0],
+            Statement::Declaration {
+                is_mut: false,
+                name: "x".to_string(),
+                type_name: ast::Type::I32,
+                initializer: None
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_array() {
+        let p = parse("const x: [512]i32;");
+        assert_eq!(p.statements.len(), 1);
+        assert_eq!(
+            p.statements[0],
+            Statement::Declaration {
+                is_mut: false,
+                name: "x".to_string(),
+                type_name: ast::Type::Array(Box::new(Type::I32), 512),
+                initializer: None
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_pointer_to_array() {
+        let p = parse("const x: *[512]i32;");
+        assert_eq!(p.statements.len(), 1);
+        assert_eq!(
+            p.statements[0],
+            Statement::Declaration {
+                is_mut: false,
+                name: "x".to_string(),
+                type_name: Type::Pointer(Box::new(Type::Array(Box::new(Type::I32), 512))),
+                initializer: None
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_array_assignment() {
+        let p = parse("x[12] = 21;");
+        assert_eq!(p.statements.len(), 1);
+        assert_eq!(
+            p.statements[0],
+            Statement::IndexAssignment {
+                name: "x".to_string(),
+                index: Expression::Integer(12),
+                value: Expression::Integer(21)
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_array_read() {
+        let p = parse("const y: u32 = x[12];");
+        assert_eq!(p.statements.len(), 1);
+        assert_eq!(
+            p.statements[0],
+            Statement::Declaration {
+                is_mut: false,
+                name: "y".to_string(),
+                type_name: Type::U32,
+                initializer: Some(Expression::Index(
+                    Box::new(Expression::Identifier("x".to_string())),
+                    Box::new(Expression::Integer(12))
+                ))
             }
         );
     }

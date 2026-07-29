@@ -6,6 +6,7 @@ pub enum Expression {
     Binary(Box<Expression>, Operator, Box<Expression>),
     AddressOf(Box<Expression>),
     Dereference(Box<Expression>),
+    Index(Box<Expression>, Box<Expression>),
 }
 #[derive(Debug, PartialEq)]
 pub enum Statement {
@@ -14,10 +15,15 @@ pub enum Statement {
         is_mut: bool,
         name: String,
         type_name: Type,
-        initializer: Expression,
+        initializer: Option<Expression>,
     },
     Assignment {
         name: String,
+        value: Expression,
+    },
+    IndexAssignment {
+        name: String,
+        index: Expression,
         value: Expression,
     },
 }
@@ -43,6 +49,7 @@ pub enum Type {
     F32,
     F64,
     Pointer(Box<Type>),
+    Array(Box<Type>, i64),
 }
 
 #[derive(Debug, PartialEq)]

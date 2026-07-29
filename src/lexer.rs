@@ -15,6 +15,8 @@ pub enum Token {
     Asterisk,
     Slash,
     Ampersand,
+    LeftBracket,
+    RightBracket,
     Illegal(String),
 }
 pub struct Lexer<'a> {
@@ -49,6 +51,8 @@ impl<'a> Lexer<'a> {
             '/' => Token::Slash,
             ':' => Token::Colon,
             '=' => Token::Equals,
+            '[' => Token::LeftBracket,
+            ']' => Token::RightBracket,
             '0'..='9' => self.lex_number(ch),
             'a'..='z' | 'A'..='Z' | '_' => self.lex_identifier(ch),
             _ => Token::Illegal(ch.to_string()),

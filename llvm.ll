@@ -5,9 +5,9 @@ define i64 @main() {
 entry:
   %x = alloca i64, align 8
   store i64 5, ptr %x, align 4
-  %x1 = load i64, ptr %x, align 4
-  %tmpadd = add i64 %x1, 10
-  store i64 %tmpadd, ptr %x, align 4
-  %x2 = load i64, ptr %x, align 4
-  ret i64 %x2
+  %p = alloca ptr, align 8
+  store ptr %x, ptr %p, align 8
+  %p1 = load ptr, ptr %p, align 8
+  %deref = load i64, ptr %p1, align 4
+  ret i64 %deref
 }

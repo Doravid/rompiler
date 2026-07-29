@@ -1,7 +1,7 @@
-use crate::ast;
-use crate::ast::Operator;
-use inkwell::AddressSpace;
+use crate::ast::{self, Expression};
+use crate::ast::{Operator, Statement};
 use inkwell::context::Context;
+use inkwell::values::BasicValueEnum;
 
 pub fn generate_ir(program: &ast::Program) -> String {
     let context: Context = Context::create();
@@ -32,10 +32,12 @@ pub fn generate_ir(program: &ast::Program) -> String {
                 initializer,
             } => {
                 let typ = get_llvm_type(type_name, &context);
-                let init_value =
-                    compile_expression(initializer, &context, &builder, &variables, typ);
                 let ptr = builder.build_alloca(typ, &name).unwrap();
-                let _ = builder.build_store(ptr, init_value);
+                if let Some(init_expr) = initializer {
+                    let init_value =
+                        compile_expression(init_expr, &context, &builder, &variables, typ);
+                    let _ = builder.build_store(ptr, init_value);
+                }
                 variables.insert(name.to_string(), (ptr, *is_mut, typ));
             }
             ast::Statement::Assignment { name, value } => {
@@ -48,6 +50,9 @@ pub fn generate_ir(program: &ast::Program) -> String {
                     panic!("Cannot mutate constant")
                 }
                 _ = builder.build_store(*ptr, new_val);
+            }
+            Statement::IndexAssignment { name, index, value } => {
+                panic!("AHHH");
             }
         }
     }
@@ -78,6 +83,29 @@ fn compile_expression<'ctx>(
             .into_float_type()
             .const_float(*val as f64)
             .into(),
+        ast::Expression::AddressOf(expr) => {
+            if let ast::Expression::Identifier(name) = &**expr {
+                let Some((ptr, _, _)) = variables.get(name) else {
+                    panic!("Uninitialized Variable")
+                };
+                (*ptr).into()
+            } else {
+                panic!("Cannot have a pointer to something other than an identifier");
+            }
+        }
+        ast::Expression::Dereference(expr) => {
+            let pointer: inkwell::values::PointerValue<'_> = compile_expression(
+                expr,
+                context,
+                builder,
+                variables,
+                inkwell::types::BasicTypeEnum::PointerType(
+                    context.ptr_type(inkwell::AddressSpace::from(0)).into(),
+                ),
+            )
+            .into_pointer_value();
+            return builder.build_load(expected_type, pointer, "deref").unwrap();
+        }
         ast::Expression::Binary(left, op, right) => {
             let lhs = compile_expression(left, context, builder, variables, expected_type);
             let rhs = compile_expression(right, context, builder, variables, expected_type);
@@ -125,6 +153,7 @@ fn get_llvm_type<'ctx>(
         ast::Type::F32 => context.f32_type().into(),
         ast::Type::F64 => context.f64_type().into(),
         ast::Type::Pointer(_) => context.ptr_type(inkwell::AddressSpace::from(0)).into(),
+        _ => panic!("AHHHH"),
     };
 }
 
@@ -222,5 +251,18 @@ mod tests {
         println!("{}", ir_string);
         assert!(ir_string.contains("alloca double"));
         assert!(ir_string.contains("store double 3.14"));
+    }
+
+    #[test]
+    fn test_generate_pointers() {
+        let lexer: Lexer<'_> = Lexer::new("var x : i64 = 5; const p : *i64 = &x; return *p;");
+        let mut parser = Parser::new(lexer);
+        let my_prog = parser.parse_program();
+
+        let ir_string: String = generate_ir(&my_prog);
+        println!("{}", ir_string);
+        assert!(ir_string.contains("store ptr"));
+        assert!(ir_string.contains("load ptr"));
+        assert!(ir_string.contains("load i64"));
     }
 }
