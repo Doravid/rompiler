@@ -317,6 +317,24 @@ impl<'a> Parser<'a> {
                 return Some(ast::Expression::Index(Box::new(left), Box::new(expr)));
             }
 
+            if self.current_token == Token::LeftParenthesis {
+                let Expression::Identifier(function_name) = left else {
+                    return None;
+                };
+                self.advance();
+                let mut x: Vec<Expression> = vec![];
+                while self.current_token != Token::RightParenthesis {
+                    x.push(self.parse_expression(0).unwrap());
+                    if self.current_token == Token::Comma {
+                        self.advance();
+                    } else if self.current_token != Token::RightParenthesis {
+                        return None;
+                    }
+                }
+                self.advance();
+                return Some(Expression::Call(function_name, x));
+            }
+
             let operator: Operator = match self.current_token {
                 Token::Asterisk => ast::Operator::Multiply,
                 Token::Plus => ast::Operator::Add,
@@ -337,7 +355,7 @@ impl<'a> Parser<'a> {
         match token {
             Token::Plus | Token::Minus => 1,
             Token::Asterisk | Token::Slash => 2,
-            Token::LeftBracket => 3,
+            Token::LeftBracket | Token::LeftParenthesis => 3,
             _ => 0,
         }
     }
@@ -583,7 +601,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_function() {
+    fn test_parse_function_decl() {
         let p = parse("func main(x: i32) : i32 { return x; }");
         assert_eq!(p.functions.len(), 1);
         assert_eq!(
@@ -593,6 +611,24 @@ mod tests {
                 parameters: vec![("x".to_string(), Type::I32)],
                 return_type: Type::I32,
                 body: vec![Statement::Return(Expression::Identifier("x".to_string()))]
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_function_call() {
+        let p = parse("func main() : i32 { return add(5, 10); }");
+        assert_eq!(p.functions.len(), 1);
+        assert_eq!(
+            p.functions[0],
+            Function {
+                name: "main".to_string(),
+                parameters: vec![],
+                return_type: Type::I32,
+                body: vec![Statement::Return(Expression::Call(
+                    "add".to_string(),
+                    vec![Expression::Integer(5), Expression::Integer(10)]
+                ))]
             }
         );
     }
