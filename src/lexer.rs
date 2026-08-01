@@ -2,6 +2,7 @@
 pub enum Token {
     Eof,
     Semicolon,
+    Comma,
     Return,
     Integer(i64),
     Float(f64),
@@ -17,8 +18,18 @@ pub enum Token {
     Ampersand,
     LeftBracket,
     RightBracket,
+    LeftParenthesis,
+    RightParenthesis,
+    LeftCurlyBrace,
+    RightCurlyBrace,
+    Function,
     Illegal(String),
 }
+
+// func my_func(arg1: type, arg2: type) : return_type {
+
+// }
+
 pub struct Lexer<'a> {
     input: std::iter::Peekable<std::str::Chars<'a>>,
 }
@@ -44,6 +55,7 @@ impl<'a> Lexer<'a> {
         };
         match ch {
             ';' => Token::Semicolon,
+            ',' => Token::Comma,
             '+' => Token::Plus,
             '-' => Token::Minus,
             '*' => Token::Asterisk,
@@ -53,6 +65,10 @@ impl<'a> Lexer<'a> {
             '=' => Token::Equals,
             '[' => Token::LeftBracket,
             ']' => Token::RightBracket,
+            '(' => Token::LeftParenthesis,
+            ')' => Token::RightParenthesis,
+            '{' => Token::LeftCurlyBrace,
+            '}' => Token::RightCurlyBrace,
             '0'..='9' => self.lex_number(ch),
             'a'..='z' | 'A'..='Z' | '_' => self.lex_identifier(ch),
             _ => Token::Illegal(ch.to_string()),
@@ -98,6 +114,7 @@ impl<'a> Lexer<'a> {
             "return" => return Token::Return,
             "const" => return Token::Const,
             "var" => return Token::Var,
+            "func" => return Token::Function,
             _ => return Token::Identifier(my_string),
         }
     }
@@ -216,5 +233,26 @@ mod tests {
         assert_eq!(token6, Token::Integer(5));
         assert_eq!(token7, Token::Semicolon);
         assert_eq!(token8, Token::Eof);
+    }
+    #[test]
+    fn test_function_tokens() {
+        let mut lexer = Lexer::new("func main(x : i32, y : i32) : i32 { }");
+
+        assert_eq!(lexer.next_token(), Token::Function);
+        assert_eq!(lexer.next_token(), Token::Identifier(String::from("main")));
+        assert_eq!(lexer.next_token(), Token::LeftParenthesis);
+        assert_eq!(lexer.next_token(), Token::Identifier(String::from("x")));
+        assert_eq!(lexer.next_token(), Token::Colon);
+        assert_eq!(lexer.next_token(), Token::Identifier(String::from("i32")));
+        assert_eq!(lexer.next_token(), Token::Comma);
+        assert_eq!(lexer.next_token(), Token::Identifier(String::from("y")));
+        assert_eq!(lexer.next_token(), Token::Colon);
+        assert_eq!(lexer.next_token(), Token::Identifier(String::from("i32")));
+        assert_eq!(lexer.next_token(), Token::RightParenthesis);
+        assert_eq!(lexer.next_token(), Token::Colon);
+        assert_eq!(lexer.next_token(), Token::Identifier(String::from("i32")));
+        assert_eq!(lexer.next_token(), Token::LeftCurlyBrace);
+        assert_eq!(lexer.next_token(), Token::RightCurlyBrace);
+        assert_eq!(lexer.next_token(), Token::Eof);
     }
 }

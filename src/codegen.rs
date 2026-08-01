@@ -18,7 +18,7 @@ pub fn generate_ir(program: &ast::Program) -> String {
 
     let mut variables = std::collections::HashMap::new();
 
-    for statement in &program.statements {
+    for statement in &program.functions[0].body {
         match statement {
             Statement::Return(expr) => {
                 let int_value =
@@ -207,6 +207,9 @@ fn compile_expression<'ctx>(
             builder
                 .build_load(expected_type, element_ptr, "elem_val")
                 .unwrap()
+        }
+        _ => {
+            panic!("");
         }
     }
 }

@@ -3,11 +3,10 @@ source_filename = "main"
 
 define i64 @main() {
 entry:
-  %x = alloca i64, align 8
-  store i64 5, ptr %x, align 4
-  %p = alloca ptr, align 8
-  store ptr %x, ptr %p, align 8
-  %p1 = load ptr, ptr %p, align 8
-  %deref = load i64, ptr %p1, align 4
-  ret i64 %deref
+  %arr = alloca [5 x i64], align 8
+  %arr_idx_ptr = getelementptr [5 x i64], ptr %arr, i64 0, i64 2
+  store i64 10, ptr %arr_idx_ptr, align 4
+  %arr_idx_ptr1 = getelementptr [5 x i64], ptr %arr, i64 0, i64 2
+  %elem_val = load i64, ptr %arr_idx_ptr1, align 4
+  ret i64 %elem_val
 }

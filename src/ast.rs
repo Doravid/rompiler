@@ -1,4 +1,4 @@
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Expression {
     Integer(i64),
     Float(f64),
@@ -7,8 +7,9 @@ pub enum Expression {
     AddressOf(Box<Expression>),
     Dereference(Box<Expression>),
     Index(Box<Expression>, Box<Expression>),
+    Call(String, Vec<Expression>),
 }
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Statement {
     Return(Expression),
     Declaration {
@@ -53,6 +54,13 @@ pub enum Type {
 }
 
 #[derive(Debug, PartialEq)]
+pub struct Function {
+    pub name: String,
+    pub parameters: Vec<(String, Type)>,
+    pub return_type: Type,
+    pub body: Vec<Statement>,
+}
+#[derive(Debug, PartialEq)]
 pub struct Program {
-    pub statements: Vec<Statement>,
+    pub functions: Vec<Function>,
 }

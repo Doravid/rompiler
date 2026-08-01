@@ -1,4 +1,4 @@
-use crate::ast::{self, Expression, Operator, Statement, Type};
+use crate::ast::{self, Expression, Function, Operator, Statement, Type};
 use crate::lexer::{Lexer, Token};
 
 pub struct Parser<'a> {
@@ -32,6 +32,66 @@ impl<'a> Parser<'a> {
             _ => None,
         }
     }
+
+    fn parse_function(&mut self) -> Option<Function> {
+        if self.current_token != Token::Function {
+            return None;
+        }
+
+        self.advance();
+        let Token::Identifier(func_name) = self.current_token.clone() else {
+            return None;
+        };
+        self.advance();
+
+        if self.current_token != Token::LeftParenthesis {
+            return None;
+        }
+        self.advance();
+
+        let mut parameters: Vec<(String, Type)> = vec![];
+        while self.current_token != Token::RightParenthesis {
+            let Token::Identifier(var_name) = self.current_token.clone() else {
+                return None;
+            };
+            self.advance();
+            if self.current_token != Token::Colon {
+                return None;
+            }
+            self.advance();
+            let var_type = self.parse_type().unwrap();
+            parameters.push((var_name, var_type));
+            if self.current_token != Token::Comma && self.current_token != Token::RightParenthesis {
+                return None;
+            }
+            if self.current_token == Token::Comma {
+                self.advance();
+            }
+        }
+        self.advance();
+        if self.current_token != Token::Colon {
+            return None;
+        }
+        self.advance();
+        let func_type = self.parse_type().unwrap();
+
+        if self.current_token != Token::LeftCurlyBrace {
+            return None;
+        }
+        self.advance();
+        let mut statements: Vec<ast::Statement> = vec![];
+        while self.current_token != Token::RightCurlyBrace {
+            statements.push(self.parse_statement().unwrap());
+        }
+
+        return Some(Function {
+            name: func_name,
+            parameters,
+            return_type: func_type,
+            body: statements,
+        });
+    }
+
     fn parse_type(&mut self) -> Option<ast::Type> {
         let is_pointer = self.current_token == Token::Asterisk;
         if is_pointer {
@@ -77,11 +137,11 @@ impl<'a> Parser<'a> {
 
     pub fn parse_program(&mut self) -> ast::Program {
         let mut prog = ast::Program {
-            statements: Vec::new(),
+            functions: Vec::new(),
         };
         while self.current_token != Token::Eof {
-            if let Some(stmt) = self.parse_statement() {
-                prog.statements.push(stmt);
+            if let Some(func) = self.parse_function() {
+                prog.functions.push(func);
             } else {
                 self.advance();
             }
@@ -112,6 +172,7 @@ impl<'a> Parser<'a> {
         };
 
         if self.current_token == Token::Semicolon {
+            self.advance();
             return Some(ast::Statement::Declaration {
                 is_mut,
                 name,
@@ -285,7 +346,7 @@ impl<'a> Parser<'a> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        ast::{self, Expression, Statement, Type},
+        ast::{self, Expression, Function, Statement, Type},
         lexer::Lexer,
         parser::Parser,
     };
@@ -311,36 +372,36 @@ mod tests {
     #[test]
     fn test_empty_program() {
         let p = parse("");
-        assert_eq!(p.statements.len(), 0);
+        assert_eq!(p.functions.len(), 0);
     }
 
     #[test]
     fn test_parse_return_statement() {
-        let p = parse("return 5;");
-        assert_eq!(p.statements.len(), 1);
-        assert_eq!(p.statements[0], ret(num(5)));
+        let p = parse("func main() : i32 { return 5; }");
+        assert_eq!(p.functions[0].body.len(), 1);
+        assert_eq!(p.functions[0].body[0], ret(num(5)));
     }
 
     #[test]
     fn test_invalid_statement() {
         let p = parse("5;");
-        assert_eq!(p.statements.len(), 0);
+        assert_eq!(p.functions.len(), 0);
     }
 
     #[test]
     fn test_parse_binary_expression() {
-        let p = parse("return 5 + 10;");
+        let p = parse("func main() : i32 { return 5 + 10; }");
         assert_eq!(
-            p.statements[0],
+            p.functions[0].body[0],
             ret(bin(num(5), ast::Operator::Add, num(10)))
         );
     }
 
     #[test]
     fn test_operator_precedence() {
-        let p = parse("return 1 + 2 * 3;");
+        let p = parse("func main() : i32 { return 1 + 2 * 3; }");
         assert_eq!(
-            p.statements[0],
+            p.functions[0].body[0],
             ret(bin(
                 num(1),
                 ast::Operator::Add,
@@ -351,9 +412,9 @@ mod tests {
 
     #[test]
     fn test_left_associativity() {
-        let p = parse("return 1 - 2 - 3;");
+        let p = parse("func main() : i32 { return 1 - 2 - 3; }");
         assert_eq!(
-            p.statements[0],
+            p.functions[0].body[0],
             ret(bin(
                 bin(num(1), ast::Operator::Subtract, num(2)),
                 ast::Operator::Subtract,
@@ -364,10 +425,10 @@ mod tests {
 
     #[test]
     fn test_parse_const_declaration() {
-        let p = parse("const x : i64 = 5;");
-        assert_eq!(p.statements.len(), 1);
+        let p = parse("func main() : i32 { const x : i64 = 5; }");
+        assert_eq!(p.functions[0].body.len(), 1);
         assert_eq!(
-            p.statements[0],
+            p.functions[0].body[0],
             Statement::Declaration {
                 is_mut: false,
                 name: "x".to_string(),
@@ -379,20 +440,20 @@ mod tests {
 
     #[test]
     fn test_parse_identifier() {
-        let p = parse("return x;");
-        assert_eq!(p.statements.len(), 1);
+        let p = parse("func main() : i32 { return x; }");
+        assert_eq!(p.functions[0].body.len(), 1);
         assert_eq!(
-            p.statements[0],
+            p.functions[0].body[0],
             Statement::Return(ast::Expression::Identifier("x".to_string()))
         );
     }
 
     #[test]
     fn test_parse_assignment() {
-        let p = parse("x = 10;");
-        assert_eq!(p.statements.len(), 1);
+        let p = parse("func main() : i32 { x = 10; }");
+        assert_eq!(p.functions[0].body.len(), 1);
         assert_eq!(
-            p.statements[0],
+            p.functions[0].body[0],
             Statement::Assignment {
                 name: "x".to_string(),
                 value: Expression::Integer(10)
@@ -402,10 +463,10 @@ mod tests {
 
     #[test]
     fn test_parse_float_declaration() {
-        let p = parse("const pi : f64 = 3.14;");
-        assert_eq!(p.statements.len(), 1);
+        let p = parse("func main() : i32 { const pi : f64 = 3.14; }");
+        assert_eq!(p.functions[0].body.len(), 1);
         assert_eq!(
-            p.statements[0],
+            p.functions[0].body[0],
             Statement::Declaration {
                 is_mut: false,
                 name: "pi".to_string(),
@@ -414,12 +475,13 @@ mod tests {
             }
         );
     }
+
     #[test]
     fn test_parse_pointer_declaration() {
-        let p = parse("const p : *i64 = &x;");
-        assert_eq!(p.statements.len(), 1);
+        let p = parse("func main() : i32 { const p : *i64 = &x; }");
+        assert_eq!(p.functions[0].body.len(), 1);
         assert_eq!(
-            p.statements[0],
+            p.functions[0].body[0],
             Statement::Declaration {
                 is_mut: false,
                 name: "p".to_string(),
@@ -433,10 +495,10 @@ mod tests {
 
     #[test]
     fn test_parse_dereference() {
-        let p = parse("return *p;");
-        assert_eq!(p.statements.len(), 1);
+        let p = parse("func main() : i32 { return *p; }");
+        assert_eq!(p.functions[0].body.len(), 1);
         assert_eq!(
-            p.statements[0],
+            p.functions[0].body[0],
             Statement::Return(ast::Expression::Dereference(Box::new(
                 ast::Expression::Identifier("p".to_string())
             )))
@@ -445,10 +507,10 @@ mod tests {
 
     #[test]
     fn test_parse_uninitialized() {
-        let p = parse("const x: i32;");
-        assert_eq!(p.statements.len(), 1);
+        let p = parse("func main() : i32 { const x: i32; }");
+        assert_eq!(p.functions[0].body.len(), 1);
         assert_eq!(
-            p.statements[0],
+            p.functions[0].body[0],
             Statement::Declaration {
                 is_mut: false,
                 name: "x".to_string(),
@@ -460,10 +522,10 @@ mod tests {
 
     #[test]
     fn test_parse_array() {
-        let p = parse("const x: [512]i32;");
-        assert_eq!(p.statements.len(), 1);
+        let p = parse("func main() : i32 { const x: [512]i32; }");
+        assert_eq!(p.functions[0].body.len(), 1);
         assert_eq!(
-            p.statements[0],
+            p.functions[0].body[0],
             Statement::Declaration {
                 is_mut: false,
                 name: "x".to_string(),
@@ -475,10 +537,10 @@ mod tests {
 
     #[test]
     fn test_parse_pointer_to_array() {
-        let p = parse("const x: *[512]i32;");
-        assert_eq!(p.statements.len(), 1);
+        let p = parse("func main() : i32 { const x: *[512]i32; }");
+        assert_eq!(p.functions[0].body.len(), 1);
         assert_eq!(
-            p.statements[0],
+            p.functions[0].body[0],
             Statement::Declaration {
                 is_mut: false,
                 name: "x".to_string(),
@@ -490,10 +552,10 @@ mod tests {
 
     #[test]
     fn test_parse_array_assignment() {
-        let p = parse("x[12] = 21;");
-        assert_eq!(p.statements.len(), 1);
+        let p = parse("func main() : i32 { x[12] = 21; }");
+        assert_eq!(p.functions[0].body.len(), 1);
         assert_eq!(
-            p.statements[0],
+            p.functions[0].body[0],
             Statement::IndexAssignment {
                 name: "x".to_string(),
                 index: Expression::Integer(12),
@@ -504,10 +566,10 @@ mod tests {
 
     #[test]
     fn test_parse_array_read() {
-        let p = parse("const y: u32 = x[12];");
-        assert_eq!(p.statements.len(), 1);
+        let p = parse("func main() : i32 { const y: u32 = x[12]; }");
+        assert_eq!(p.functions[0].body.len(), 1);
         assert_eq!(
-            p.statements[0],
+            p.functions[0].body[0],
             Statement::Declaration {
                 is_mut: false,
                 name: "y".to_string(),
@@ -516,6 +578,21 @@ mod tests {
                     Box::new(Expression::Identifier("x".to_string())),
                     Box::new(Expression::Integer(12))
                 ))
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_function() {
+        let p = parse("func main(x: i32) : i32 { return x; }");
+        assert_eq!(p.functions.len(), 1);
+        assert_eq!(
+            p.functions[0],
+            Function {
+                name: "main".to_string(),
+                parameters: vec![("x".to_string(), Type::I32)],
+                return_type: Type::I32,
+                body: vec![Statement::Return(Expression::Identifier("x".to_string()))]
             }
         );
     }
