@@ -1,7 +1,7 @@
-use crate::ast::{self, Expression};
+use crate::ast::{self, Expression, Type};
 use crate::ast::{Operator, Statement};
 use inkwell::context::Context;
-use inkwell::values::BasicValueEnum;
+use inkwell::types::BasicType;
 
 pub fn generate_ir(program: &ast::Program) -> String {
     let context: Context = Context::create();
@@ -20,12 +20,12 @@ pub fn generate_ir(program: &ast::Program) -> String {
 
     for statement in &program.statements {
         match statement {
-            ast::Statement::Return(expr) => {
+            Statement::Return(expr) => {
                 let int_value =
                     compile_expression(expr, &context, &builder, &variables, i64_type.into());
                 builder.build_return(Some(&int_value)).unwrap();
             }
-            ast::Statement::Declaration {
+            Statement::Declaration {
                 is_mut,
                 name,
                 type_name,
@@ -40,6 +40,7 @@ pub fn generate_ir(program: &ast::Program) -> String {
                 }
                 variables.insert(name.to_string(), (ptr, *is_mut, typ));
             }
+
             ast::Statement::Assignment { name, value } => {
                 let Some((ptr, is_mut, type_name)) = variables.get(name) else {
                     panic!("Uninitialized Variable")
@@ -51,8 +52,42 @@ pub fn generate_ir(program: &ast::Program) -> String {
                 }
                 _ = builder.build_store(*ptr, new_val);
             }
+
             Statement::IndexAssignment { name, index, value } => {
-                panic!("AHHH");
+                let Some((ptr, is_mut, type_name)) = variables.get(name) else {
+                    panic!("Uninitialized Variable")
+                };
+                if !*is_mut {
+                    panic!("Trying to modify a const array!");
+                }
+                let comp_index = compile_expression(
+                    index,
+                    &context,
+                    &builder,
+                    &variables,
+                    context.i64_type().into(),
+                );
+                let elem_type = if type_name.is_array_type() {
+                    type_name.into_array_type().get_element_type()
+                } else {
+                    *type_name
+                };
+                let comp_value =
+                    compile_expression(value, &context, &builder, &variables, elem_type);
+
+                let zero = context.i64_type().const_zero();
+
+                let element_ptr = unsafe {
+                    builder
+                        .build_gep(
+                            *type_name,
+                            *ptr,
+                            &[zero, comp_index.into_int_value()],
+                            &format!("{name}_idx_ptr"),
+                        )
+                        .unwrap()
+                };
+                _ = builder.build_store(element_ptr, comp_value);
             }
         }
     }
@@ -138,22 +173,59 @@ fn compile_expression<'ctx>(
             };
             builder.build_load(*type_name, *ptr, name).unwrap()
         }
-        _ => panic!(),
+        ast::Expression::Index(left, index) => {
+            let Expression::Identifier(ref name) = **left else {
+                panic!("ERROR: Expected identifier on left side of index expression");
+            };
+
+            let Some((ptr, _, type_name)) = variables.get(name) else {
+                panic!("ERROR: Uninitialized Variable {name}");
+            };
+
+            let index_val = compile_expression(
+                index,
+                context,
+                builder,
+                variables,
+                context.i64_type().into(),
+            )
+            .into_int_value();
+
+            let zero = context.i64_type().const_zero();
+
+            let element_ptr = unsafe {
+                builder
+                    .build_gep(
+                        *type_name,
+                        *ptr,
+                        &[zero, index_val],
+                        &format!("{name}_idx_ptr"),
+                    )
+                    .unwrap()
+            };
+
+            builder
+                .build_load(expected_type, element_ptr, "elem_val")
+                .unwrap()
+        }
     }
 }
+
 fn get_llvm_type<'ctx>(
     ast_type: &ast::Type,
     context: &'ctx Context,
 ) -> inkwell::types::BasicTypeEnum<'ctx> {
     return match ast_type {
-        ast::Type::I8 | ast::Type::U8 => context.i8_type().into(),
-        ast::Type::I16 | ast::Type::U16 => context.i16_type().into(),
-        ast::Type::I32 | ast::Type::U32 => context.i32_type().into(),
-        ast::Type::I64 | ast::Type::U64 => context.i64_type().into(),
-        ast::Type::F32 => context.f32_type().into(),
-        ast::Type::F64 => context.f64_type().into(),
-        ast::Type::Pointer(_) => context.ptr_type(inkwell::AddressSpace::from(0)).into(),
-        _ => panic!("AHHHH"),
+        Type::I8 | Type::U8 => context.i8_type().into(),
+        Type::I16 | Type::U16 => context.i16_type().into(),
+        Type::I32 | Type::U32 => context.i32_type().into(),
+        Type::I64 | Type::U64 => context.i64_type().into(),
+        Type::F32 => context.f32_type().into(),
+        Type::F64 => context.f64_type().into(),
+        Type::Pointer(_) => context.ptr_type(inkwell::AddressSpace::from(0)).into(),
+        Type::Array(base_type, size) => get_llvm_type(base_type, context)
+            .array_type(*size as u32)
+            .into(),
     };
 }
 
@@ -264,5 +336,18 @@ mod tests {
         assert!(ir_string.contains("store ptr"));
         assert!(ir_string.contains("load ptr"));
         assert!(ir_string.contains("load i64"));
+    }
+
+    #[test]
+    fn test_arrays() {
+        let lexer: Lexer<'_> = Lexer::new("var arr: [5]i64; arr[2] = 10; return arr[2];");
+        let mut parser = Parser::new(lexer);
+        let my_prog = parser.parse_program();
+
+        let ir_string: String = generate_ir(&my_prog);
+        println!("{}", ir_string);
+        assert!(ir_string.contains("getelementptr"));
+        assert!(ir_string.contains("store"));
+        assert!(ir_string.contains("load"));
     }
 }
